@@ -1,26 +1,14 @@
-import inspect
+"""Type serialization manager that coordinates different handlers."""
+
 import json
-import importlib
 from typing import Any, Dict
 import numpy as np
 from numpy import ndarray
 
-
-def show_memebers(obj: object):
-    members = inspect.getmembers(obj)
-    print("==" * 30)
-    for member in members:
-        print(member)
-    print("==" * 30)
-
-    print(obj.__class__.__name__)
-    for name, value in members:
-        if not callable(value) and not name.startswith("_"):
-            print(name, value, type(value))
-    print("-" * 30)
+# Import handlers directly without base classes for now to avoid circular imports
+# We'll add proper inheritance later
 
 
-# Modular Type Handlers
 class TypeSerializer:
     """Manages all type handlers for serialization/deserialization."""
 
@@ -47,6 +35,8 @@ class TypeSerializer:
 
     def deserialize_value(self, value_dict: Dict[str, Any]) -> Any:
         """Deserialize a value using the appropriate handler."""
+        value_type = value_dict.get("type", "")
+
         # Find the right handler based on type
         for handler in self.handlers:
             if handler.can_deserialize(value_dict):
@@ -56,6 +46,7 @@ class TypeSerializer:
         return value_dict.get("value")
 
 
+# Handler classes
 class NumpyArrayHandler:
     """Handler for numpy arrays."""
 
@@ -197,7 +188,6 @@ class TreeHandler:
                 "n_features": value.n_features,
                 "n_classes": value.n_classes,
                 "n_outputs": value.n_outputs,
-                "missing_go_to_left": getattr(value, "missing_go_to_left", None),
             }
             return {
                 "value": {
@@ -215,13 +205,47 @@ class TreeHandler:
             }
 
     def deserialize(self, value_dict: Dict[str, Any]) -> Any:
-        # Tree objects cannot be reconstructed directly due to read-only attributes
-        # Instead, we return a marker that tells the deserializer to reconstruct at model level
-        return {
-            "_tree_data": value_dict["value"],
-            "_tree_marker": True,
-            "_original_type": "sklearn.tree._tree.Tree",
-        }
+        try:
+            import importlib
+
+            tree_module = importlib.import_module("sklearn.tree._tree")
+            Tree = getattr(tree_module, "Tree")
+
+            tree_data = value_dict["value"]
+
+            children_left = np.array(tree_data["children_left"], dtype=np.intp)
+            children_right = np.array(tree_data["children_right"], dtype=np.intp)
+            feature = np.array(tree_data["feature"], dtype=np.intp)
+            threshold = np.array(tree_data["threshold"], dtype=np.float64)
+            impurity = np.array(tree_data["impurity"], dtype=np.float64)
+            n_node_samples = np.array(tree_data["n_node_samples"], dtype=np.intp)
+            weighted_n_node_samples = np.array(
+                tree_data["weighted_n_node_samples"], dtype=np.float64
+            )
+            value_array = np.array(tree_data["value"], dtype=np.float64)
+
+            n_features = tree_data["n_features"]
+            n_classes = np.array([tree_data["n_classes"]], dtype=np.intp)
+            n_outputs = tree_data["n_outputs"]
+
+            tree = Tree(n_features, n_classes, n_outputs)
+
+            tree.children_left = children_left
+            tree.children_right = children_right
+            tree.feature = feature
+            tree.threshold = threshold
+            tree.impurity = impurity
+            tree.n_node_samples = n_node_samples
+            tree.weighted_n_node_samples = weighted_n_node_samples
+            tree.value = value_array
+            tree.capacity = tree_data["capacity"]
+            tree.node_count = tree_data["node_count"]
+            tree.max_depth = tree_data["max_depth"]
+
+            return tree
+        except Exception as e:
+            print(f"Warning: Could not reconstruct Tree object: {e}")
+            return None
 
 
 class ListHandler:
@@ -365,238 +389,12 @@ class FallbackHandler:
 _type_serializer = TypeSerializer()
 
 
-def _serialize_value(value: Any) -> Dict[str, Any]:
+def serialize_value(value: Any) -> Dict[str, Any]:
     """Serialize a single value with proper type handling."""
     return _type_serializer.serialize_value(value)
 
 
-def _deserialize_value(value_dict: Dict[str, Any]) -> Any:
+def deserialize_value(value_dict: Dict[str, Any]) -> Any:
     """Deserialize a single value with proper type reconstruction."""
     return _type_serializer.deserialize_value(value_dict)
 
-
-def serialize_json(obj: object) -> str:
-    """Serialize a sklearn model to JSON string."""
-    members = inspect.getmembers(obj)
-    out_dict: Dict[str, Any] = {}
-
-    # Store class information
-    class_name = obj.__class__.__name__
-    module_name = obj.__class__.__module__
-    out_dict["__class__"] = class_name
-    out_dict["__module__"] = module_name
-
-    # Serialize members
-    member_dict = {}
-
-    # Define important sklearn internal attributes that should be serialized
-    important_sklearn_internals = {
-        "_sparse",
-        "_gamma",
-        "_impl",
-        "_intercept_",
-        "_dual_coef_",
-        "_n_support",
-        "_num_iter",
-        "_probA",
-        "_probB",
-        "_sparse_kernels",
-        "_estimator_type",
-        "_coef_",
-        "_intercepts_",
-        "_weights",
-        "_biases",
-        "_tree",
-        "_trees",
-        "_estimators_",
-        "_oob_score",
-        "_label_binarizer",
-        "_classes",
-        "_enc",
-        "_fit_method",
-        "_coef_grads",
-        "_intercept_grads",
-        "_loss_history",
-        "_no_improvement_count",
-        "_fit_X",
-        "_y",
-        "_max_components",
-        "_n_features_out",
-    }
-
-    # Check if this is a tree-based model that needs special handling
-    is_tree_model = (
-        hasattr(obj, "tree_")
-        or "tree" in obj.__class__.__module__
-        or "Tree" in obj.__class__.__name__
-    )
-
-    # For tree models, we'll store a flag to indicate we need training data for reconstruction
-    if is_tree_model:
-        out_dict["__needs_refitting__"] = True
-
-    for name, value in members:
-        # Include if: not callable, doesn't start with __ (dunder), and either doesn't start with _
-        # OR is an important sklearn internal attribute
-        should_include = (
-            not callable(value)
-            and not name.startswith("__")
-            and (not name.startswith("_") or name in important_sklearn_internals)
-        )
-
-        if should_include:
-            member_dict[name] = _serialize_value(value)
-
-    out_dict["members"] = member_dict
-    return json.dumps(out_dict, indent=4)
-
-
-def deserialize_object(json_str: str) -> object:
-    """Deserialize a JSON string back to a sklearn model."""
-    obj_dict = json.loads(json_str)
-    class_name = obj_dict["__class__"]
-    module_name = obj_dict.get("__module__")
-    needs_refitting = obj_dict.get("__needs_refitting__", False)
-
-    # Ensure we have module information
-    if not module_name:
-        raise ValueError(
-            f"No module information available for class '{class_name}'. "
-            f"The JSON was likely created with an older version that didn't store module names."
-        )
-
-    # Import the module and get the class
-    try:
-        module = importlib.import_module(module_name)
-        cls = getattr(module, class_name)
-    except (ImportError, AttributeError) as e:
-        raise ValueError(f"Could not import {class_name} from {module_name}: {e}")
-
-    # Extract initialization parameters and fitted attributes
-    members = obj_dict.get("members", {})
-    init_params = {}
-    fitted_attrs = {}
-
-    # Separate constructor parameters from fitted attributes
-    # Most sklearn models have these common fitted attributes that end with _
-    fitted_attr_patterns = [
-        "_",
-        "coef_",
-        "intercept_",
-        "feature_importances_",
-        "n_features_in_",
-        "classes_",
-        "singular_",
-        "rank_",
-    ]
-
-    for name, value_dict in members.items():
-        # Fitted attributes: end with _, start with _, or start with n_
-        is_fitted_attr = (
-            any(name.endswith(pattern) for pattern in fitted_attr_patterns)
-            or name.startswith("_")
-            or name.startswith("n_")
-        )
-
-        if is_fitted_attr:
-            fitted_attrs[name] = _deserialize_value(value_dict)
-        else:
-            # These are constructor parameters
-            deserialized_value = _deserialize_value(value_dict)
-            if deserialized_value is not None:
-                init_params[name] = deserialized_value
-
-    # Create instance with constructor parameters
-    try:
-        obj = cls(**init_params)
-    except TypeError:
-        # Fallback: create with no params and set all attributes manually
-        obj = cls()
-        for name, value in init_params.items():
-            try:
-                setattr(obj, name, value)
-            except Exception as e:
-                print(f"Warning: Could not set parameter '{name}': {e}")
-
-    # Set fitted attributes (including None values which some models need)
-    for name, value in fitted_attrs.items():
-        try:
-            # Special handling for tree objects that cannot be directly reconstructed
-            if (
-                isinstance(value, dict)
-                and value.get("_tree_marker")
-                and needs_refitting
-            ):
-                # For tree-based models that need refitting, skip tree_ for now
-                if name == "tree_":
-                    continue
-
-            # Skip computed properties that don't have setters
-            if name in [
-                "feature_importances_",
-                "n_support_",
-                "probA_",
-                "probB_",
-                "sparse_coef_",
-                "_n_features_out",
-            ]:
-                continue
-
-            setattr(obj, name, value)
-        except Exception as e:
-            print(f"Warning: Could not set fitted attribute '{name}': {e}")
-
-    # Special handling for models that need refitting to restore internal structures
-    if needs_refitting:
-        # Check if we have both training data and labels stored
-        if (
-            hasattr(obj, "_fit_X")
-            and hasattr(obj, "_y")
-            and obj._fit_X is not None
-            and obj._y is not None
-        ):
-            try:
-                # Save current state
-                original_fit_x = obj._fit_X.copy()
-                original_y = obj._y.copy()
-
-                # Save other important fitted attributes that won't be lost during refitting
-                saved_attrs = {}
-                for attr_name in ["n_features_in_", "feature_names_in_", "classes_"]:
-                    if hasattr(obj, attr_name):
-                        saved_attrs[attr_name] = getattr(obj, attr_name)
-
-                # Re-fit to rebuild internal structures (tree, etc.)
-                obj.fit(original_fit_x, original_y)
-
-                # Restore saved attributes that might have been overwritten
-                for attr_name, attr_value in saved_attrs.items():
-                    try:
-                        setattr(obj, attr_name, attr_value)
-                    except:
-                        pass
-
-            except Exception as e:
-                print(f"Warning: Could not rebuild model internal structures: {e}")
-        else:
-            print(
-                f"Warning: {class_name} requires training data to fully reconstruct tree structure"
-            )
-
-    # Handle KNeighbors models specifically (they also need rebuilding)
-    elif hasattr(obj, "_fit_X") and hasattr(obj, "_y") and obj._fit_X is not None:
-        if (
-            "neighbors" in obj.__class__.__module__
-            and "KNeighbors" in obj.__class__.__name__
-        ):
-            try:
-                # Save current state
-                original_fit_x = obj._fit_X.copy()
-                original_y = obj._y.copy()
-
-                # Re-fit to rebuild internal structures (tree, etc.)
-                obj.fit(original_fit_x, original_y)
-            except Exception as e:
-                print(f"Warning: Could not rebuild KNeighbors internal structures: {e}")
-
-    return obj
