@@ -11,7 +11,7 @@ A Python library for serializing and deserializing scikit-learn models to/from J
 - ✅ **Prediction consistency**: Deserialized models produce identical predictions
 - ✅ **Complex object handling**: Support for sklearn internal objects (LabelBinarizer, Tree structures)
 - ✅ **Training data preservation**: Automatic rebuilding of internal structures for models like KNeighbors
-- ✅ **High compatibility**: 83.3% success rate across common sklearn models
+- ✅ **High compatibility**: 88.2% success rate across supervised and unsupervised sklearn models
 
 ## Installation
 
@@ -45,9 +45,9 @@ assert np.array_equal(model.predict(X), restored_model.predict(X))
 
 ## Supported Models
 
-**Current success rate: 10/12 models (83.3%)** - Most common sklearn models work perfectly!
+**Current success rate: 15/17 models (88.2%)** - Covers both supervised and unsupervised learning!
 
-### ✅ Fully Supported Models
+### ✅ Fully Supported Supervised Models
 All these models serialize/deserialize with **perfect prediction preservation**:
 
 #### Linear Models
@@ -68,10 +68,26 @@ All these models serialize/deserialize with **perfect prediction preservation**:
 - ✅ **MLPClassifier** - Multi-layer perceptron classifier
 - ✅ **MLPRegressor** - Multi-layer perceptron regressor
 
-### ❌ Currently Unsupported
+#### Discriminant Analysis
+- ✅ **LinearDiscriminantAnalysis** - Linear discriminant analysis for classification and dimensionality reduction
+
+### ✅ Fully Supported Unsupervised Models
+All unsupervised models work perfectly with **complete state preservation**:
+
+#### Clustering Models
+- ✅ **KMeans** - K-means clustering with centroids and labels
+- ✅ **DBSCAN** - Density-based clustering with noise detection
+- ✅ **AgglomerativeClustering** - Hierarchical clustering
+
+#### Dimensionality Reduction
+- ✅ **PCA** - Principal Component Analysis with components and explained variance
+
+### ❌ Currently Unsupported (Supervised Models)
 - **DecisionTreeClassifier/Regressor** - Complex tree structure serialization issues
 
 ### 🔧 Recent Improvements
+- **Added unsupervised learning support** - Now supports clustering and dimensionality reduction models
+- **Fixed LinearDiscriminantAnalysis** - Added missing internal attributes for complete serialization
 - **Fixed SVC/SVR models** - Added sklearn internal attributes serialization
 - **Fixed MLP models** - Enhanced list serialization for numpy arrays
 - **Fixed KNeighbors models** - Implemented training data preservation and tree rebuilding
@@ -110,6 +126,42 @@ model = sklser.deserialize_object(json_data)
 
 # Use restored model
 predictions = model.predict(X_test)
+```
+
+### Unsupervised Model Serialization
+
+```python
+import sklser
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.datasets import make_blobs
+
+# Create clustering data
+X, _ = make_blobs(n_samples=300, centers=4, random_state=42)
+
+# Train and serialize a clustering model
+kmeans = KMeans(n_clusters=4, random_state=42)
+kmeans.fit(X)
+
+# Serialize the clustering model
+json_data = sklser.serialize_json(kmeans)
+
+# Deserialize and verify
+restored_kmeans = sklser.deserialize_object(json_data)
+assert hasattr(restored_kmeans, 'labels_')  # Labels preserved
+
+# Train and serialize a dimensionality reduction model  
+pca = PCA(n_components=2)
+pca.fit(X)
+
+# Serialize the PCA model
+pca_json = sklser.serialize_json(pca)
+
+# Deserialize and verify transformation consistency
+restored_pca = sklser.deserialize_object(pca_json)
+original_transform = pca.transform(X[:5])
+restored_transform = restored_pca.transform(X[:5])
+assert np.allclose(original_transform, restored_transform)
 ```
 
 ### Testing Model Compatibility
@@ -199,6 +251,8 @@ The serialization format includes:
 ## What's Fixed
 
 Recent improvements have resolved many previous limitations:
+- ✅ **Unsupervised learning support** - Added clustering and dimensionality reduction models
+- ✅ **LinearDiscriminantAnalysis** - Fixed missing internal attributes for complete serialization
 - ✅ **Training data preservation** - KNeighbors models now rebuild internal structures
 - ✅ **Complex sklearn objects** - LabelBinarizer and other internal objects are supported
 - ✅ **SVM internal attributes** - Support vector models now serialize completely

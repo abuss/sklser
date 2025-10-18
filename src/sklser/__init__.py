@@ -196,6 +196,8 @@ def serialize_json(obj: object) -> str:
         "_no_improvement_count",
         "_fit_X",
         "_y",
+        "_max_components",
+        "_n_features_out",
     }
 
     for name, value in members:
