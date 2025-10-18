@@ -29,6 +29,8 @@ class TypeSerializer:
         self.handlers = [
             NumpyArrayHandler(),
             NumpyScalarHandler(),
+            PipelineHandler(),
+            FeatureUnionHandler(),
             LabelBinarizerHandler(),
             TreeHandler(),
             ListHandler(),
@@ -315,6 +317,8 @@ class GenericHandler:
                 value_dict.get("special_list", False),
                 value_dict.get("label_binarizer", False),
                 value_dict.get("tree_structure", False),
+                value_dict.get("pipeline", False),
+                value_dict.get("feature_union", False),
                 value_dict.get("type") == "numpy.ndarray",
             ]
         )
@@ -324,6 +328,146 @@ class GenericHandler:
 
     def deserialize(self, value_dict: Dict[str, Any]) -> Any:
         return value_dict["value"]
+
+
+class PipelineHandler:
+    """Handler for sklearn Pipeline objects."""
+
+    def can_handle(self, value: Any) -> bool:
+        return hasattr(value, "__class__") and "sklearn.pipeline.Pipeline" in str(type(value))
+
+    def can_deserialize(self, value_dict: Dict[str, Any]) -> bool:
+        return value_dict.get("type") == "sklearn.pipeline.Pipeline"
+
+    def serialize(self, value: Any) -> Dict[str, Any]:
+        try:
+            # Serialize each step in the pipeline
+            serialized_steps = []
+            for step_name, estimator in value.steps:
+                # Use the main serialize_json function for each estimator
+                # but parse it back to get the dict structure
+                estimator_json = serialize_json(estimator)
+                estimator_dict = json.loads(estimator_json)
+                serialized_steps.append({
+                    "name": step_name,
+                    "estimator": estimator_dict
+                })
+            
+            return {
+                "value": {
+                    "steps": serialized_steps,
+                    "memory": getattr(value, "memory", None),
+                    "verbose": getattr(value, "verbose", False)
+                },
+                "type": "sklearn.pipeline.Pipeline",
+                "pipeline": True,
+            }
+        except Exception as e:
+            return {
+                "value": "COMPLEX_PIPELINE",
+                "type": str(type(value)),
+                "error": str(e),
+            }
+
+    def deserialize(self, value_dict: Dict[str, Any]) -> Any:
+        try:
+            # Dynamic import to avoid issues
+            pipeline_module = importlib.import_module("sklearn.pipeline")
+            Pipeline = getattr(pipeline_module, "Pipeline")
+
+            pipeline_data = value_dict["value"]
+            
+            # Deserialize each step
+            steps = []
+            for step_data in pipeline_data["steps"]:
+                step_name = step_data["name"]
+                # Use the main deserialize_object function for each estimator
+                # but convert it back to JSON string first
+                estimator_json = json.dumps(step_data["estimator"])
+                estimator = deserialize_object(estimator_json)
+                steps.append((step_name, estimator))
+
+            # Create the pipeline with the deserialized steps
+            pipeline = Pipeline(
+                steps=steps,
+                memory=pipeline_data.get("memory"),
+                verbose=pipeline_data.get("verbose", False)
+            )
+
+            return pipeline
+        except Exception as e:
+            print(f"Warning: Could not reconstruct Pipeline object: {e}")
+            return None
+
+
+class FeatureUnionHandler:
+    """Handler for sklearn FeatureUnion objects."""
+
+    def can_handle(self, value: Any) -> bool:
+        return hasattr(value, "__class__") and "sklearn.pipeline.FeatureUnion" in str(type(value))
+
+    def can_deserialize(self, value_dict: Dict[str, Any]) -> bool:
+        return value_dict.get("type") == "sklearn.pipeline.FeatureUnion"
+
+    def serialize(self, value: Any) -> Dict[str, Any]:
+        try:
+            # Serialize each transformer in the FeatureUnion
+            serialized_transformers = []
+            for transformer_name, transformer in value.transformer_list:
+                # Use the main serialize_json function for each transformer
+                transformer_json = serialize_json(transformer)
+                transformer_dict = json.loads(transformer_json)
+                serialized_transformers.append({
+                    "name": transformer_name,
+                    "transformer": transformer_dict
+                })
+            
+            return {
+                "value": {
+                    "transformer_list": serialized_transformers,
+                    "n_jobs": getattr(value, "n_jobs", None),
+                    "transformer_weights": getattr(value, "transformer_weights", None),
+                    "verbose": getattr(value, "verbose", False)
+                },
+                "type": "sklearn.pipeline.FeatureUnion",
+                "feature_union": True,
+            }
+        except Exception as e:
+            return {
+                "value": "COMPLEX_FEATUREUNION",
+                "type": str(type(value)),
+                "error": str(e),
+            }
+
+    def deserialize(self, value_dict: Dict[str, Any]) -> Any:
+        try:
+            # Dynamic import to avoid issues
+            pipeline_module = importlib.import_module("sklearn.pipeline")
+            FeatureUnion = getattr(pipeline_module, "FeatureUnion")
+
+            featureunion_data = value_dict["value"]
+            
+            # Deserialize each transformer
+            transformer_list = []
+            for transformer_data in featureunion_data["transformer_list"]:
+                transformer_name = transformer_data["name"]
+                # Use the main deserialize_object function for each transformer
+                transformer_json = json.dumps(transformer_data["transformer"])
+                transformer = deserialize_object(transformer_json)
+                transformer_list.append((transformer_name, transformer))
+
+            # Create the FeatureUnion with the deserialized transformers
+            feature_union = FeatureUnion(
+                transformer_list=transformer_list,
+                n_jobs=featureunion_data.get("n_jobs"),
+                transformer_weights=featureunion_data.get("transformer_weights"),
+                verbose=featureunion_data.get("verbose", False)
+            )
+
+            return feature_union
+        except Exception as e:
+            print(f"Warning: Could not reconstruct FeatureUnion object: {e}")
+            return None
 
 
 class FallbackHandler:
@@ -356,6 +500,8 @@ class FallbackHandler:
             "UNSERIALIZABLE",
             "COMPLEX_TREE_OBJECT",
             "COMPLEX_LABELBINARIZER",
+            "COMPLEX_PIPELINE",
+            "COMPLEX_FEATUREUNION",
         ]:
             return None
         return value_dict["value"]
@@ -377,6 +523,29 @@ def _deserialize_value(value_dict: Dict[str, Any]) -> Any:
 
 def serialize_json(obj: object) -> str:
     """Serialize a sklearn model to JSON string."""
+    
+    # Special handling for Pipeline and FeatureUnion objects
+    if "sklearn.pipeline.Pipeline" in str(type(obj)):
+        # Use PipelineHandler for serialization
+        for handler in _type_serializer.handlers:
+            if isinstance(handler, PipelineHandler):
+                serialized_data = handler.serialize(obj)
+                # Add class information for top-level object
+                serialized_data["__class__"] = obj.__class__.__name__
+                serialized_data["__module__"] = obj.__class__.__module__
+                return json.dumps(serialized_data, indent=4)
+    
+    if "sklearn.pipeline.FeatureUnion" in str(type(obj)):
+        # Use FeatureUnionHandler for serialization
+        for handler in _type_serializer.handlers:
+            if isinstance(handler, FeatureUnionHandler):
+                serialized_data = handler.serialize(obj)
+                # Add class information for top-level object
+                serialized_data["__class__"] = obj.__class__.__name__
+                serialized_data["__module__"] = obj.__class__.__module__
+                return json.dumps(serialized_data, indent=4)
+    
+    # Regular sklearn object serialization
     members = inspect.getmembers(obj)
     out_dict: Dict[str, Any] = {}
 
@@ -456,6 +625,21 @@ def deserialize_object(json_str: str) -> object:
     obj_dict = json.loads(json_str)
     class_name = obj_dict["__class__"]
     module_name = obj_dict.get("__module__")
+    
+    # Special handling for Pipeline and FeatureUnion objects
+    if obj_dict.get("pipeline", False) and class_name == "Pipeline":
+        # Use PipelineHandler for deserialization
+        for handler in _type_serializer.handlers:
+            if isinstance(handler, PipelineHandler):
+                return handler.deserialize(obj_dict)
+    
+    if obj_dict.get("feature_union", False) and class_name == "FeatureUnion":
+        # Use FeatureUnionHandler for deserialization
+        for handler in _type_serializer.handlers:
+            if isinstance(handler, FeatureUnionHandler):
+                return handler.deserialize(obj_dict)
+    
+    # Regular sklearn object deserialization
     needs_refitting = obj_dict.get("__needs_refitting__", False)
 
     # Ensure we have module information
