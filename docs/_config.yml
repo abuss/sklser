@@ -11,7 +11,7 @@ repository: "abuss/sklser"
 github_username: "abuss"
 
 # Theme settings
-theme: minima
+theme: modernist
 plugins:
   - jekyll-feed
   - jekyll-sitemap
