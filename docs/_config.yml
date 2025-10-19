@@ -3,12 +3,12 @@
 # Site settings
 title: sklearn-serialize
 description: A comprehensive Python library for serializing scikit-learn models to JSON format
-url: "https://sklearn-serialize.github.io"
+url: "https://sklser.github.io"
 baseurl: ""
 
 # Repository information
-repository: "username/sklearn-serialize"
-github_username: "your-username"
+repository: "abuss/sklser"
+github_username: "abuss"
 
 # Theme settings
 theme: minima
@@ -76,3 +76,4 @@ exclude:
   - vendor/cache/
   - vendor/gems/
   - vendor/ruby/
+
