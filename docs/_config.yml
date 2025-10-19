@@ -1,0 +1,78 @@
+# GitHub Pages configuration for sklearn-serialize documentation
+
+# Site settings
+title: sklearn-serialize
+description: A comprehensive Python library for serializing scikit-learn models to JSON format
+url: "https://sklearn-serialize.github.io"
+baseurl: ""
+
+# Repository information
+repository: "username/sklearn-serialize"
+github_username: "your-username"
+
+# Theme settings
+theme: minima
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+  - jekyll-seo-tag
+
+# Markdown settings
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Navigation
+header_pages:
+  - index.md
+  - api/index.md
+  - examples/index.md
+  - guides/index.md
+
+# Collections for better organization
+collections:
+  api:
+    output: true
+    permalink: /:collection/:name/
+  examples:
+    output: true
+    permalink: /:collection/:name/
+  guides:
+    output: true
+    permalink: /:collection/:name/
+
+# Defaults
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "page"
+  - scope:
+      path: ""
+      type: "api"
+    values:
+      layout: "page"
+  - scope:
+      path: ""
+      type: "examples"
+    values:
+      layout: "page"
+  - scope:
+      path: ""
+      type: "guides"
+    values:
+      layout: "page"
+
+# Exclude files from processing
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
